@@ -1,0 +1,5 @@
+repos:
+  - repo: https://github.com
+    rev: 0.19.2  # Актуальная версия на начало 2024
+    hooks:
+      - id: wemake-python-styleguide

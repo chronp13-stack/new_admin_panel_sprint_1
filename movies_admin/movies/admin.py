@@ -43,5 +43,3 @@ class PersonAdmin(admin.ModelAdmin):
 
     # Поиск по полям
     search_fields = ("full_name", "id")
-
-    pass

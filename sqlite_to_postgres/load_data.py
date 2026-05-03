@@ -1,62 +1,19 @@
+import logging
+import os
 import sqlite3
-from dataclasses import dataclass, asdict
-from typing import Optional, List, Generator
+from dataclasses import asdict
+from typing import List, Generator
+from pathlib import Path
 
 import psycopg
 from psycopg import ClientCursor, connection as _connection
 from psycopg.rows import dict_row
 from tests.check_consistency.check_consistency import test_migration_integrity
-
-# =========================
-# Dataclasses
-# =========================
+from models import FilmWork, Genre, GenreFilmWork, Person, PersonFilmWork
+from dotenv import load_dotenv
 
 
-@dataclass
-class Genre:
-    id: str
-    name: str
-    description: Optional[str]
-    created: str
-    modified: str
-
-
-@dataclass
-class FilmWork:
-    id: str
-    title: str
-    description: Optional[str]
-    creation_date: Optional[str]
-    rating: Optional[float]
-    type: str
-    created: str
-    modified: str
-
-
-@dataclass
-class Person:
-    id: str
-    full_name: str
-    created: str
-    modified: str
-
-
-@dataclass
-class GenreFilmWork:
-    id: str
-    genre_id: str
-    film_work_id: str
-    created: str
-
-
-@dataclass
-class PersonFilmWork:
-    id: str
-    person_id: str
-    film_work_id: str
-    role: str
-    created: str
-
+logger = logging.getLogger(__name__)
 
 # =========================
 # SQLite Loader
@@ -114,8 +71,8 @@ class PostgresSaver:
         try:
             with self.conn.cursor() as cur:
                 cur.executemany(query, rows)
-        except Exception as e:
-            print(f"Ошибка записи в {table}: {e}")
+        except Exception:
+            logger.exception("Ошибка записи в таблицу %s", table)
             raise
 
 
@@ -133,9 +90,6 @@ def transform_data(
 
     for row in rows:
         data = {rename_map.get(key, key): value for key, value in dict(row).items()}
-        # for sqlite_col, value in dict(row).items():
-        #    pg_col = rename_map.get(sqlite_col, sqlite_col)
-        #    data[pg_col] = value
 
         if table == "genre":
             obj = Genre(**data)
@@ -203,7 +157,7 @@ def load_from_sqlite(connection: sqlite3.Connection, pg_conn: _connection):
     }
 
     for table, field_mapping in TABLES_MAP.items():
-        print(f"Загрузка таблицы: {table}")
+        logger.info("Загрузка таблицы: %s", table)
         # Список колонок для SQL-запроса к SQLite
         sqlite_columns = list(field_mapping.values())
         # Список колонок для INSERT-запроса в Postgres
@@ -214,17 +168,17 @@ def load_from_sqlite(connection: sqlite3.Connection, pg_conn: _connection):
                 saver.save_batch(table, pg_columns, transformed)
             pg_conn.commit()
 
-        except Exception as e:
-            print(f"Ошибка при обработке таблицы {table}: {e}")
+        except Exception:
+            logger.exception("Ошибка при обработке таблицы %s", table)
             pg_conn.rollback()
 
     # --- ЗАПУСК ТЕСТА ПОСЛЕ ВСЕХ ТАБЛИЦ ---
-    print("\n--- Запуск проверки целостности данных ---")
+    logger.info("Запуск проверки целостности данных")
     try:
         test_migration_integrity(connection, pg_conn, TABLES_MAP)
-        print("Миграция завершена успешно и проверена!")
+        logger.info("Миграция завершена успешно и проверена")
     except AssertionError as e:
-        print(f"Тест не пройден: {e}")
+        logger.error("Тест не пройден: %s", e)
 
 
 # =========================
@@ -232,16 +186,27 @@ def load_from_sqlite(connection: sqlite3.Connection, pg_conn: _connection):
 # =========================
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    )
+    # У меня немного разные пути до .env поэтому закомментированные для себя
+    # оставляю чтобы файлы не отличались и можно было переключаться
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    # BASE_DIR = Path(__file__).resolve().parent
+    load_dotenv(BASE_DIR / "movies_admin" / "config" / ".env")
+    # load_dotenv(BASE_DIR / "config" / ".env")
+
     dsl = {
-        "dbname": "movies_database",
-        "user": "app",
-        "password": "123qwe",
-        "host": "127.0.0.1",
-        "port": 5432,
+        "dbname": os.environ.get("DB_NAME"),
+        "user": os.environ.get("DB_USER"),
+        "password": os.environ.get("DB_PASSWORD"),
+        "host": os.environ.get("DB_HOST", "127.0.0.1"),
+        "port": os.environ.get("DB_PORT", "5432"),
     }
 
     with sqlite3.connect("db.sqlite") as sqlite_conn, psycopg.connect(
         **dsl, row_factory=dict_row, cursor_factory=ClientCursor
     ) as pg_conn:
         load_from_sqlite(sqlite_conn, pg_conn)
-        print("\n--- Запуск тестов ---")
+        logger.info("Запуск тестов")

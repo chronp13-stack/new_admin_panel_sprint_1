@@ -71,6 +71,12 @@ class GenreFilmWork(UUIDMixin):
 
     class Meta:
         db_table = 'content"."genre_film_work'
+        constraints = [
+            models.UniqueConstraint(
+                fields=["film_work", "genre"],
+                name="film_work_genre_idx",
+            ),
+        ]
 
 
 class Person(UUIDMixin, TimeStampedMixin):
